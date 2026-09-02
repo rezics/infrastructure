@@ -1,0 +1,54 @@
+version: "3"
+
+tasks:
+  check:
+    desc: Run the complete local validation suite.
+    cmds:
+      - task: format:check
+      - task: flake:check
+      - task: jobs:check
+      - task: policy:check
+
+  format:check:
+    desc: Check every Nix expression with the flake formatter.
+    cmds:
+      - >-
+        nixfmt="$(nix build .#formatter.x86_64-linux --no-link --print-out-paths)";
+        find . -path './.git' -prune -o -type f -name '*.nix' -print |
+        while IFS= read -r file; do "$nixfmt/bin/nixfmt" --check "$file"; done
+
+  flake:check:
+    desc: Evaluate and build every exported flake check.
+    cmds:
+      - nix flake check --all-systems --show-trace --print-build-logs
+
+  jobs:check:
+    desc: Validate all Nomad jobspecs.
+    cmds:
+      - >-
+        command -v nomad >/dev/null ||
+        { echo 'nomad is required for jobs:check' >&2; exit 1; };
+        set -eu;
+        find jobs -type f -name '*.hcl' -print |
+        while IFS= read -r jobspec; do
+          case "${jobspec##*/}" in
+            rezics-api.nomad.hcl)
+              nomad job validate -var api_image=10.64.0.1:5000/rezics-api:check "$jobspec";;
+            rezics-worker.nomad.hcl)
+              nomad job validate -var worker_image=10.64.0.1:5000/rezics-worker:check "$jobspec";;
+            *) nomad job validate "$jobspec";;
+          esac;
+        done
+
+  policy:check:
+    desc: Run shell, Go, placement, and secret-policy checks.
+    cmds:
+      - >-
+        command -v shellcheck >/dev/null ||
+        { echo 'shellcheck is required for policy:check' >&2; exit 1; };
+        shellcheck scripts/*.sh
+      - >-
+        command -v go >/dev/null ||
+        { echo 'go is required for policy:check' >&2; exit 1; };
+        cd services/release-gateway && go test ./...
+      - bash ./scripts/check-public-policy.sh

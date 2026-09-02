@@ -1,0 +1,6 @@
+/.direnv/
+/.temp/
+/result
+/result-*
+*.swp
+*~
