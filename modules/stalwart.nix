@@ -78,12 +78,9 @@ in
         session.auth.mechanisms = [
           {
             "if" = "local_port != 25 && is_tls";
-            "then" = [
-              "plain"
-              "login"
-            ];
+            "then" = "[plain, login]";
           }
-          { "else" = [ ]; }
+          { "else" = "[]"; }
         ];
       };
     };

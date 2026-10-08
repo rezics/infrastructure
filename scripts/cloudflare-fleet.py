@@ -84,6 +84,14 @@ elif args.mode == "retire":
         if worker["id"] in desired["retiredWorkers"]:
             api(f"accounts/{account}/workers/scripts/{worker['id']}?force=true", "DELETE")
             print("Deleted retired Worker", worker["id"])
+    for application in api(f"accounts/{account}/access/apps"):
+        if application.get("domain") in desired["retiredHostnames"]:
+            api(f"accounts/{account}/access/apps/{application['id']}", "DELETE")
+            print("Deleted retired Access application", application["domain"])
+    for project in api(f"accounts/{account}/pages/projects"):
+        if project["name"] in desired.get("retiredPages", []):
+            api(f"accounts/{account}/pages/projects/{project['name']}?force=true", "DELETE")
+            print("Deleted retired Pages project", project["name"])
 else:
     for record in records():
         if record["name"] in [desired["domain"], desired["mailHostname"]] or record["name"].startswith("cf-bounce"):
