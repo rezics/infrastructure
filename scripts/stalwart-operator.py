@@ -39,6 +39,21 @@ if args.mode == "stage":
     password_hash = subprocess.check_output(["openssl", "passwd", "-6", "-stdin"], input=credentials["admin"]["password"].encode()).strip()
     encoded = base64.b64encode(password_hash).decode()
     script = "set -eu\ninstall -d -m 0700 /var/lib/stalwart-secrets\numask 077\nprintf '%s' '" + encoded + "' | base64 -d > /var/lib/stalwart-secrets/admin-password-hash\n"
+    if desired.get("mailBackup"):
+        source = json.loads((secret_dir / "secret.json").read_text())["cloudflare"]["backupR2"]
+        credentials.setdefault("mailBackupPassword", secrets.token_urlsafe(48))
+        credential_file.write_text(json.dumps(credentials, indent=2) + "\n")
+        credential_file.chmod(0o600)
+        backup_env = {
+            "AWS_ACCESS_KEY_ID": source["accessKeyId"],
+            "AWS_SECRET_ACCESS_KEY": source["secretAccessKey"],
+            "AWS_DEFAULT_REGION": "auto",
+            "AWS_REGION": "auto",
+            "RESTIC_REPOSITORY": "s3:" + source["endpoint"].rstrip("/") + "/" + source["bucket"] + "/mail/stalwart/restic",
+            "RESTIC_PASSWORD": credentials["mailBackupPassword"],
+        }
+        encoded_env = base64.b64encode(("\n".join(k + "=" + json.dumps(v) for k, v in backup_env.items()) + "\n").encode()).decode()
+        script += "printf '%s' '" + encoded_env + "' | base64 -d > /var/lib/stalwart-secrets/backup.env\n"
     command = ["ssh", "-i", str(secret_dir / "server/b/operator-ed25519"), "-o", "BatchMode=yes", "-o", "IdentitiesOnly=yes", "-o", "StrictHostKeyChecking=yes", f"{server['username']}@{server['host']}", "bash -s"]
     subprocess.run(command, input=script.encode(), check=True)
     print("Stalwart admin credential staged; passwords remain in", credential_file)

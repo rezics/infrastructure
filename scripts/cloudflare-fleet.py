@@ -90,6 +90,8 @@ elif args.mode == "retire":
             print("Deleted retired Access application", application["domain"])
     for project in api(f"accounts/{account}/pages/projects"):
         if project["name"] in desired.get("retiredPages", []):
+            for domain in api(f"accounts/{account}/pages/projects/{project['name']}/domains"):
+                api(f"accounts/{account}/pages/projects/{project['name']}/domains/{domain['name']}", "DELETE")
             api(f"accounts/{account}/pages/projects/{project['name']}?force=true", "DELETE")
             print("Deleted retired Pages project", project["name"])
 else:
