@@ -16,14 +16,20 @@ encrypted secret payloads, or deployment credentials.
   Its reconciler purges the named retired application jobs and preserves the
   Databasus control backup and restore verification agent.
 - `nixosModules.mail` exposes the opt-in `services.rezicsMail` contract:
-  hostname, ACME contact, runtime admin password hash file and public interface.
-  It runs single-node Stalwart with authenticated TLS submission and a
-  loopback-only HTTP management listener.
+  hostname, domain, forwarding addresses, ACME contact, runtime admin hash and
+  initial provisioning files, and public interface. It runs Stalwart 0.16.25
+  with a JSON RocksDB descriptor and applies its Git-managed JMAP policy before
+  opening the mail listeners. Initial passwords are hashed by Stalwart using
+  Argon2id; existing account passwords are preserved on subsequent starts.
+  Submission requires authentication and TLS. HTTP on 8085 is loopback-only;
+  the administrative WebUI remains available on public HTTPS with password login.
 - `nixosModules.backupPause` exposes `services.rezicsBackupPause.enable`, which
   persistently pauses only the retired `rezics` database's backup and scheduled
   verification while retaining its history and the Outline schedules.
 - `packages.x86_64-linux.release-gateway` builds the OIDC-authenticated release
   gateway.
+- `packages.x86_64-linux.stalwart` and `stalwart-cli` package SHA-256-pinned
+  upstream static releases, independent of the older Nixpkgs TOML module.
 
 The consuming fleet repository owns `nixosConfigurations`, hardware configuration,
 network identities, SOPS declarations, credential paths, and activation policy. It
@@ -33,6 +39,15 @@ The existing `edge` and `data` outputs retain their contracts. Fleet composition
 selects which outputs to import; importing `retainedEdge` does not import `edge`.
 Operator scripts receive private Cloudflare configuration and forwarding address
 files as arguments. They never contain production origin addresses or passwords.
+
+The Stalwart runtime provisioning JSON contains `mailbox` (username and initial
+password) and `dkim` (initial JMAP signature records). Keep it outside Git and
+load it through systemd credentials. `stalwart-operator.py stage --dkim-file`
+stages this file and the admin hash; it preserves existing backup credentials.
+DKIM key material is inserted once into the mail datastore. Host and routing
+policy is reconciled on startup; user accounts and installed Applications remain
+persistent Stalwart state. The 0.16 deployment uses a fresh `db-v016` store;
+the module does not migrate old TOML stores.
 
 ```nix
 {
