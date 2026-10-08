@@ -6,6 +6,75 @@
 }:
 let
   cfg = config.services.rezicsMail;
+  server = pkgs.callPackage ../packages/stalwart.nix { };
+  cli = pkgs.callPackage ../packages/stalwart-cli.nix { };
+  dataDir = "/var/lib/stalwart";
+  datastore = pkgs.writeText "stalwart-config.json" (
+    builtins.toJSON {
+      "@type" = "RocksDb";
+      path = "${dataDir}/db-v016";
+    }
+  );
+  policy = pkgs.writeText "stalwart-policy.json" (
+    builtins.toJSON {
+      inherit (cfg) hostname domain forwarding;
+      certificate = {
+        certificate = {
+          "@type" = "File";
+          filePath = "/var/lib/acme/${cfg.hostname}/fullchain.pem";
+        };
+        privateKey = {
+          "@type" = "File";
+          filePath = "/var/lib/acme/${cfg.hostname}/key.pem";
+        };
+      };
+      listeners = {
+        smtp = {
+          name = "smtp";
+          protocol = "smtp";
+          bind."0.0.0.0:25" = true;
+        };
+        submission = {
+          name = "submission";
+          protocol = "smtp";
+          bind."0.0.0.0:587" = true;
+        };
+        submissions = {
+          name = "submissions";
+          protocol = "smtp";
+          bind."0.0.0.0:465" = true;
+          tlsImplicit = true;
+        };
+        imaps = {
+          name = "imaps";
+          protocol = "imap";
+          bind."0.0.0.0:993" = true;
+          tlsImplicit = true;
+        };
+        https = {
+          name = "https";
+          protocol = "http";
+          bind."0.0.0.0:443" = true;
+          tlsImplicit = true;
+        };
+        management = {
+          name = "management";
+          protocol = "http";
+          bind."127.0.0.1:8085" = true;
+          useTls = false;
+        };
+      };
+    }
+  );
+  configure = pkgs.writeShellScript "configure-stalwart" ''
+    exec ${pkgs.python3}/bin/python3 ${../scripts/configure-stalwart.py} \
+      --policy ${policy} --config ${datastore} \
+      --server ${server}/bin/stalwart --cli ${cli}/bin/stalwart-cli
+  '';
+  start = pkgs.writeShellScript "start-stalwart" ''
+    export STALWART_RECOVERY_ADMIN="admin:$(cat "$CREDENTIALS_DIRECTORY/admin")"
+    exec ${server}/bin/stalwart --config ${datastore}
+  '';
   backup = pkgs.writeShellApplication {
     name = "backup-stalwart";
     runtimeInputs = [
@@ -43,91 +112,78 @@ in
       type = lib.types.str;
       description = "Runtime-only admin password hash file.";
     };
+    initialProvisioningFile = lib.mkOption {
+      type = lib.types.str;
+      description = "Runtime-only initial mailbox credential and DKIM key material.";
+    };
+    domain = lib.mkOption { type = lib.types.str; };
+    forwarding = lib.mkOption {
+      type = lib.types.listOf (
+        lib.types.submodule {
+          options.address = lib.mkOption { type = lib.types.str; };
+          options.destinations = lib.mkOption { type = lib.types.listOf lib.types.str; };
+        }
+      );
+      default = [ ];
+    };
     publicInterface = lib.mkOption {
       type = lib.types.str;
       default = "eth0";
     };
   };
   config = lib.mkIf cfg.enable {
-    services.stalwart = {
-      enable = true;
-      stateVersion = "26.05";
-      openFirewall = false;
-      credentials.admin = cfg.adminPasswordHashFile;
-      settings = {
-        server.hostname = cfg.hostname;
-        server.listener = {
-          smtp = {
-            bind = [ "0.0.0.0:25" ];
-            protocol = "smtp";
-          };
-          submission = {
-            bind = [ "0.0.0.0:587" ];
-            protocol = "smtp";
-          };
-          submissions = {
-            bind = [ "0.0.0.0:465" ];
-            protocol = "smtp";
-            tls.implicit = true;
-          };
-          imaps = {
-            bind = [ "0.0.0.0:993" ];
-            protocol = "imap";
-            tls.implicit = true;
-          };
-          https = {
-            bind = [ "0.0.0.0:443" ];
-            protocol = "http";
-            tls.implicit = true;
-          };
-          management = {
-            bind = [ "127.0.0.1:8085" ];
-            protocol = "http";
-          };
-        };
-        authentication.fallback-admin = {
-          user = "admin";
-          secret = "%{file:/run/credentials/stalwart.service/admin}%";
-        };
-        certificate.default = {
-          cert = "%{file:/var/lib/acme/${cfg.hostname}/fullchain.pem}%";
-          private-key = "%{file:/var/lib/acme/${cfg.hostname}/key.pem}%";
-          default = true;
-        };
-        session.auth.require = [
-          {
-            "if" = "local_port != 25";
-            "then" = true;
-          }
-          { "else" = false; }
-        ];
-        session.auth.mechanisms = [
-          {
-            "if" = "local_port != 25 && is_tls";
-            "then" = "[plain, login]";
-          }
-          { "else" = "[]"; }
-        ];
-      };
+    users.groups.stalwart = { };
+    users.users.stalwart = {
+      isSystemUser = true;
+      group = "stalwart";
+      home = dataDir;
     };
+    environment.systemPackages = [
+      server
+      cli
+    ];
     security.acme = {
       acceptTerms = true;
       defaults.email = cfg.contactEmail;
       certs."${cfg.hostname}" = {
         listenHTTP = ":80";
-        group = config.services.stalwart.group;
+        group = "stalwart";
         reloadServices = [ "stalwart" ];
       };
     };
     systemd.services.stalwart = {
+      description = "Stalwart mail server";
+      wantedBy = [ "multi-user.target" ];
       wants = [ "acme-${cfg.hostname}.service" ];
       after = [ "acme-${cfg.hostname}.service" ];
-      serviceConfig.MemoryMax = "2G";
+      environment.STALWART_HOSTNAME = cfg.hostname;
+      serviceConfig = {
+        User = "stalwart";
+        Group = "stalwart";
+        StateDirectory = "stalwart";
+        StateDirectoryMode = "0700";
+        LoadCredential = [
+          "admin:${cfg.adminPasswordHashFile}"
+          "initial:${cfg.initialProvisioningFile}"
+        ];
+        ExecStartPre = configure;
+        ExecStart = start;
+        AmbientCapabilities = [ "CAP_NET_BIND_SERVICE" ];
+        CapabilityBoundingSet = [ "CAP_NET_BIND_SERVICE" ];
+        Restart = "on-failure";
+        TimeoutStartSec = "5min";
+        UMask = "0077";
+        MemoryMax = "2G";
+        NoNewPrivileges = true;
+        PrivateTmp = true;
+        ProtectHome = true;
+        ProtectSystem = "strict";
+      };
     };
     systemd.services.stalwart-backup = lib.mkIf cfg.backup.enable {
       description = "Encrypted Stalwart recovery set with restore verification";
       environment = {
-        STALWART_DATA_DIR = toString config.services.stalwart.dataDir;
+        STALWART_DATA_DIR = dataDir;
         STALWART_ADMIN_HASH_FILE = cfg.adminPasswordHashFile;
       };
       serviceConfig = {

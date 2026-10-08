@@ -53,6 +53,8 @@
       };
 
       packages.${system} = rec {
+        stalwart = pkgs.callPackage ./packages/stalwart.nix { };
+        stalwart-cli = pkgs.callPackage ./packages/stalwart-cli.nix { };
         release-gateway = pkgs.callPackage ./packages/release-gateway.nix { };
         default = release-gateway;
       };
@@ -67,7 +69,9 @@
         ];
       };
 
-      checks.${system}.release-gateway = self.packages.${system}.release-gateway;
+      checks.${system} = {
+        inherit (self.packages.${system}) release-gateway stalwart stalwart-cli;
+      };
       formatter.${system} = pkgs.nixfmt;
     };
 }
