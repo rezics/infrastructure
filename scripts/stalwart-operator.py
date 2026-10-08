@@ -55,6 +55,8 @@ def api(path, method="GET", payload=None, missing=False):
         if missing and error.code == 404:
             return None
         raise RuntimeError(f"Stalwart {method} {path}: HTTP {error.code}") from None
+    if missing and data.get("error") == "notFound":
+        return None
     if "error" in data:
         raise RuntimeError(f"Stalwart {method} {path}: {data['error']}")
     return data.get("data")
