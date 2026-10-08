@@ -1,6 +1,12 @@
 version: "3"
 
 tasks:
+  format:
+    cmds:
+      - >-
+        nixfmt="$(nix build .#formatter.x86_64-linux --no-link --print-out-paths)";
+        find . -path './.git' -prune -o -type f -name '*.nix' -print |
+        while IFS= read -r file; do "$nixfmt/bin/nixfmt" "$file"; done
   check:
     desc: Run the complete local validation suite.
     cmds:
@@ -52,3 +58,4 @@ tasks:
         { echo 'go is required for policy:check' >&2; exit 1; };
         cd services/release-gateway && go test ./...
       - bash ./scripts/check-public-policy.sh
+      - python3 -c 'import ast,pathlib; [ast.parse(p.read_text(), filename=str(p)) for p in pathlib.Path("scripts").glob("*.py")]'

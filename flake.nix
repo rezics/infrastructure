@@ -39,6 +39,17 @@
         };
 
         data = base;
+        retainedPlatform = ./modules/fleet-services.nix;
+        mail = ./modules/stalwart.nix;
+        backupPause = ./modules/backup-pause.nix;
+        retainedEdge = {
+          imports = [
+            base
+            retainedPlatform
+            cloudflaredTunnel
+          ];
+          services.rezicsRetainedPlatform.enable = true;
+        };
       };
 
       packages.${system} = rec {
