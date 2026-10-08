@@ -15,8 +15,8 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 systemctl is-active --quiet stalwart.service
-systemctl stop stalwart.service
 quiesced=true
+systemctl stop stalwart.service
 mkdir "$work/snapshot"
 cp -a --reflink=auto "$data_dir" "$work/snapshot/stalwart"
 cp "$admin_hash" "$work/snapshot/admin-password-hash"
